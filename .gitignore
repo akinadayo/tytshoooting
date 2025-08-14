@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Build output
+.dist/
+dist/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+*.log
+
+# PM2
+.pm2/
+logs/
+pids/
+
+# Env
+.env
+.dev.vars
+
+# Wrangler local state
+.wrangler/
