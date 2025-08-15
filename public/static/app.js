@@ -10,7 +10,9 @@ const state = {
   lives: 1,
   stage: 1,
   spreadUntil: 0, // 横展開（多方向ショット）有効期限
-  a3Until: 0 // A3圧縮（敵テキスト縮小）有効期限
+  a3Until: 0, // A3圧縮（敵テキスト縮小）有効期限
+  shakeT: 0, // 画面シェイク残フレーム
+  shakeAmp: 0 // シェイク振幅
 }
 
 const BOSSES = ['係長','課長','部長','常務','社長']
@@ -41,6 +43,7 @@ const PANEL = `
       <button id="spreadBtn" class="btn">横展開</button>
       <button id="bombBtn" class="btn">5Sボム</button>
       <button id="a3Btn" class="btn">A3圧縮</button>
+      <button id="audioBtn" class="btn">♪BGM</button>
       <div class="ml-auto text-xs text-gray-400">液晶: Orbitron</div>
     </div>
   </div>
@@ -60,6 +63,7 @@ function mountUI() {
   $('#spreadBtn').onclick = activateSpread
   $('#bombBtn').onclick = fiveSBomb
   $('#a3Btn').onclick = activateA3
+  $('#audioBtn').onclick = toggleAudio
 }
 
 function emitToast(text, ms = 1000) {
@@ -85,6 +89,54 @@ function addLife(v){ state.lives += v; updateHUD() }
 
 let ctx, canvas, player, objects = [], bullets = [], enemyBullets = [], drops = [], effects = []
 let touchStartMeta = null
+
+// ===== Audio (WebAudio) =====
+let audio = { ctx:null, master:null, bgm:null, bgmGain:null, enabled:false }
+function initAudio(){
+  if(audio.ctx) return
+  const AC = window.AudioContext || window.webkitAudioContext
+  const ctx = new AC()
+  const master = ctx.createGain(); master.gain.value = 0.8; master.connect(ctx.destination)
+  const bgmGain = ctx.createGain(); bgmGain.gain.value = 0.12; bgmGain.connect(master)
+  audio = { ctx, master, bgm:null, bgmGain, enabled:true }
+}
+function startBGM(){
+  if(!audio.ctx) initAudio()
+  if(audio.bgm) return
+  const o1 = audio.ctx.createOscillator(); o1.type='sawtooth'
+  const o2 = audio.ctx.createOscillator(); o2.type='triangle'
+  o1.connect(audio.bgmGain); o2.connect(audio.bgmGain)
+  const now = audio.ctx.currentTime
+  const base = 110 // A2
+  function sched(t, ratio){ o1.frequency.setValueAtTime(base*ratio, t); o2.frequency.setValueAtTime(base*ratio*2, t) }
+  for(let i=0;i<64;i++){
+    const t = now + i*0.5
+    const pat = [1, 5/4, 3/2, 2][i%4] // A, C#, E, A
+    sched(t, pat)
+  }
+  o1.start(); o2.start()
+  audio.bgm = { o1, o2 }
+}
+function stopBGM(){ if(audio.bgm){ audio.bgm.o1.stop(); audio.bgm.o2.stop(); audio.bgm=null } }
+function toggleAudio(){
+  if(!audio.enabled){ audio.enabled=true; initAudio(); startBGM(); return }
+  if(!audio.ctx){ initAudio(); startBGM(); return }
+  if(audio.bgm){ stopBGM(); audio.enabled=false } else { startBGM(); }
+}
+function playSE(type='hit'){
+  if(!audio.enabled){ return }
+  if(!audio.ctx) initAudio()
+  const ctx = audio.ctx
+  const g = ctx.createGain(); g.connect(audio.master); g.gain.value = 0.2
+  let o
+  if(type==='hit'){ o=ctx.createOscillator(); o.type='square'; o.frequency.value=880; g.gain.setValueAtTime(0.2,ctx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime+0.12) }
+  else if(type==='shoot'){ o=ctx.createOscillator(); o.type='triangle'; o.frequency.value=660; g.gain.setValueAtTime(0.15,ctx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime+0.08) }
+  else if(type==='bomb'){ o=ctx.createOscillator(); o.type='sawtooth'; o.frequency.value=220; g.gain.setValueAtTime(0.3,ctx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime+0.4) }
+  else if(type==='pickup'){ o=ctx.createOscillator(); o.type='triangle'; o.frequency.value=1320; g.gain.setValueAtTime(0.15,ctx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime+0.2) }
+  else if(type==='death'){ o=ctx.createOscillator(); o.type='sawtooth'; o.frequency.value=110; g.gain.setValueAtTime(0.35,ctx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime+0.6) }
+  else { o=ctx.createOscillator(); o.frequency.value=440 }
+  o.connect(g); o.start(); o.stop(ctx.currentTime+0.6)
+}
 
 function start(){
   if(state.running) return
@@ -131,20 +183,25 @@ window.addEventListener('keyup', e=> keys[e.key]=false)
 function attachInput(){
   // タッチ開始：位置記録・即座に自機をそこへ
   canvas.addEventListener('touchstart', e=>{
+    if(!audio.ctx){ initAudio(); startBGM() }
     const t = e.touches[0]
     const rect = canvas.getBoundingClientRect()
     const x = (t.clientX - rect.left) * (canvas.width/rect.width)
     const y = (t.clientY - rect.top) * (canvas.height/rect.height)
-    player.x = x; player.y = y
-    touchStartMeta = { x, y, time: performance.now() }
+    // 相対移動方式: 自機初期位置とタッチ開始位置を記録
+    touchStartMeta = { x0:x, y0:y, px0:player.x, py0:player.y, time: performance.now() }
   }, { passive: true })
   // タッチ移動：ドラッグで自機移動
   canvas.addEventListener('touchmove', e=>{
-    if(!player) return
+    if(!player || !touchStartMeta) return
     const t = e.touches[0]
     const rect = canvas.getBoundingClientRect()
-    player.x = (t.clientX - rect.left) * (canvas.width/rect.width)
-    player.y = (t.clientY - rect.top) * (canvas.height/rect.height)
+    const x = (t.clientX - rect.left) * (canvas.width/rect.width)
+    const y = (t.clientY - rect.top) * (canvas.height/rect.height)
+    const dx = x - touchStartMeta.x0
+    const dy = y - touchStartMeta.y0
+    player.x = touchStartMeta.px0 + dx
+    player.y = touchStartMeta.py0 + dy
   }, { passive: true })
   // タッチ終了：短時間・小移動なら現地現物発動
   canvas.addEventListener('touchend', e=>{
@@ -155,7 +212,7 @@ function attachInput(){
       const rect = canvas.getBoundingClientRect()
       const x = (endTouch.clientX - rect.left) * (canvas.width/rect.width)
       const y = (endTouch.clientY - rect.top) * (canvas.height/rect.height)
-      const dx = x - touchStartMeta.x, dy = y - touchStartMeta.y
+      const dx = x - touchStartMeta.x0, dy = y - touchStartMeta.y0
       const moved = Math.hypot(dx,dy)
       if(dt < 220 && moved < 12){
         freezeBulletsNear(x,y,36, 90)
@@ -165,14 +222,22 @@ function attachInput(){
     touchStartMeta = null
   })
   // マウスドラッグで移動（PC用）
-  let dragging=false
-  canvas.addEventListener('mousedown', e=>{ dragging=true; const rect=canvas.getBoundingClientRect(); player.x=(e.clientX-rect.left)*(canvas.width/rect.width); player.y=(e.clientY-rect.top)*(canvas.height/rect.height) })
-  window.addEventListener('mouseup', ()=> dragging=false)
+  let dragging=false, dragMeta=null
+  canvas.addEventListener('mousedown', e=>{ 
+    dragging=true; const rect=canvas.getBoundingClientRect(); 
+    const x=(e.clientX-rect.left)*(canvas.width/rect.width); const y=(e.clientY-rect.top)*(canvas.height/rect.height)
+    dragMeta = { x0:x, y0:y, px0:player.x, py0:player.y }
+    if(!audio.ctx){ initAudio(); startBGM() }
+  })
+  window.addEventListener('mouseup', ()=> { dragging=false; dragMeta=null })
   canvas.addEventListener('mousemove', e=>{
-    if(!dragging) return
+    if(!dragging || !dragMeta) return
     const rect = canvas.getBoundingClientRect()
-    player.x = (e.clientX - rect.left) * (canvas.width/rect.width)
-    player.y = (e.clientY - rect.top) * (canvas.height/rect.height)
+    const x = (e.clientX - rect.left) * (canvas.width/rect.width)
+    const y = (e.clientY - rect.top) * (canvas.height/rect.height)
+    const dx = x - dragMeta.x0, dy = y - dragMeta.y0
+    player.x = dragMeta.px0 + dx
+    player.y = dragMeta.py0 + dy
   })
 }
 
@@ -195,7 +260,7 @@ function step(){
 
   // 自弾（横展開対応）
   if(perfNow()%10===0){
-    bullets.push({x:player.x, y:player.y-12, vy:-4, vx:0})
+    bullets.push({x:player.x, y:player.y-12, vy:-4, vx:0}); playSE('shoot')
     if(state.spreadUntil > perfNow()){
       bullets.push({x:player.x, y:player.y-12, vy:-3.5, vx:-2})
       bullets.push({x:player.x, y:player.y-12, vy:-3.5, vx: 2})
@@ -234,9 +299,10 @@ function step(){
       if(Math.abs(b.x-o.x)<10 && Math.abs(b.y-o.y)<14){
         o.hp-=1; b.y=-999
         if(o.hp<=0){
+          playSE('hit')
           state.score+= (o.type==='boss'? 800: 60)
           if(o.type==='boss') {
-            emitToast('最終出社、お疲れ様でした')
+            banner('最終出社、お疲れ様でした', '#aeea00', 90)
             spawnSmoke(o.x, o.y)
             nextStage()
           }
@@ -254,10 +320,12 @@ function step(){
     else { e.x+=e.vx; e.y+=e.vy }
     if(Math.abs(e.x-player.x)<10 && Math.abs(e.y-player.y)<12){
       state.hp -= 10; e.y=999
-      emitToast(`上司：やる気ある？（撃墜）`)
+      addShake(10, 20)
+      banner('上司：やる気ある？', '#ff4545', 50)
+      playSE('hit')
       if(state.hp<=0){
-        if(state.lives>0){ state.lives--; state.hp=100; emitToast('有給申請（強制）で復活') }
-        else { state.running=false; emitToast('退職エンド（ジョーク）') }
+        if(state.lives>0){ state.lives--; state.hp=100; banner('有給申請（強制）で復活', '#00ffc6', 60) }
+        else { state.running=false; banner('退職エンド（ジョーク）', '#ffffff', 120); playSE('death') }
       }
       updateHUD()
     }
@@ -359,8 +427,18 @@ function drawBossHP(b){
   ctx.restore()
 }
 
+function addShake(amp=6, t=15){ state.shakeAmp=Math.max(state.shakeAmp, amp); state.shakeT=Math.max(state.shakeT, t) }
+function banner(text,color='#fff', life=60){ effects.push({ type:'banner', text, color, t:0, life }) }
+
 function draw(){
   ctx.clearRect(0,0,WIDTH,HEIGHT)
+  // シェイク
+  if(state.shakeT>0){
+    const dx = (Math.random()*2-1)*state.shakeAmp
+    const dy = (Math.random()*2-1)*state.shakeAmp
+    ctx.save(); ctx.translate(dx, dy)
+    state.shakeT--; if(state.shakeT<=0) { state.shakeAmp=0; ctx.restore() } else { ctx._shaked = true }
+  }
   // 背景（工場ライン＋標語ポスター）
   ctx.fillStyle = 'rgba(0,255,198,0.06)'
   for(let y=60;y<HEIGHT;y+=80){ ctx.fillRect(0,y,WIDTH,6) }
@@ -417,7 +495,7 @@ function draw(){
   drops.forEach(d=>{ ctx.fillText(DROPS[d.type].label, d.x, d.y||0) })
   ctx.shadowBlur = 0
 
-  // エフェクト（爆散→煙「説教」）
+  // エフェクト（爆散→煙「説教」＆バナー）
   effects.forEach(f=>{
     if(f.type==='smoke'){
       const a = 1 - f.t/f.life
@@ -427,12 +505,28 @@ function draw(){
       ctx.font = `bold ${16 + f.t*0.3}px Noto Sans JP`
       ctx.fillText(f.text, f.x, f.y - f.t*0.4)
       ctx.restore()
+    } else if(f.type==='banner'){
+      const a = 1 - f.t/f.life
+      const scale = 1 + Math.sin(f.t/4)*0.06
+      ctx.save()
+      ctx.globalAlpha = Math.max(0, a)
+      ctx.fillStyle = f.color
+      ctx.textAlign = 'center'
+      ctx.font = `800 ${Math.floor(22*scale)}px Noto Sans JP`
+      ctx.strokeStyle = 'rgba(0,0,0,0.7)'; ctx.lineWidth = 4
+      ctx.strokeText(f.text, WIDTH/2, HEIGHT*0.4)
+      ctx.fillText(f.text, WIDTH/2, HEIGHT*0.4)
+      ctx.restore()
+      f.t++
     }
   })
 
   // ボスHPゲージ（最前面）
   const b = getBoss()
   if(b && b.hp>0) drawBossHP(b)
+
+  // シェイク解除用restore
+  if(ctx._shaked){ ctx.restore(); ctx._shaked=false }
 }
 
 function perfNow(){ return Math.floor(performance.now()/16) }
