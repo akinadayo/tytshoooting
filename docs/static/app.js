@@ -22,7 +22,7 @@ const STAGE_BULLETS = [
   // STAGE 2: フロー・JIT 系
   ['ジャストインタイム','タクトタイム','平準化','カンバン','同期化','段取り替え','ポカヨケ','自働化','アンドン','ラインストップ','流れ化','工程設計','リードタイム'],
   // STAGE 3: マネジメント・コスト
-  ['方針管理','大部屋','自工程完結','在庫ゼロ','原価低減','原単位','工程内仕掛','平準箱','稼働率','ひと物設備','能力表','人員配置','工数低減'],
+  ['方針管理','大部屋','自工程完結','在庫ゼロ','原価低減','原単位','工程内仕掛','平準箱','稼働率','ひと物設備','人員配置','工数低減'],
   // STAGE 4: 品質・問題解決
   ['5Why','なぜなぜ5回','真因','要因解析','QC七つ道具','パレート図','管理図','ヒストグラム','品質保証','不良ゼロ','再発防止','見える不良','工程監査'],
   // STAGE 5: 文化・強化ワード
@@ -43,7 +43,6 @@ const PANEL = `
       <button id="spreadBtn" class="btn">横展開</button>
       <button id="bombBtn" class="btn">5Sボム</button>
       <button id="a3Btn" class="btn">A3圧縮</button>
-      <button id="audioBtn" class="btn">♪BGM</button>
       <div class="ml-auto text-xs text-gray-400">液晶: Orbitron</div>
     </div>
   </div>
@@ -63,7 +62,6 @@ function mountUI() {
   $('#spreadBtn').onclick = activateSpread
   $('#bombBtn').onclick = fiveSBomb
   $('#a3Btn').onclick = activateA3
-  $('#audioBtn').onclick = toggleAudio
 }
 
 function emitToast(text, ms = 1000) {
@@ -90,41 +88,17 @@ function addLife(v){ state.lives += v; updateHUD() }
 let ctx, canvas, player, objects = [], bullets = [], enemyBullets = [], drops = [], effects = []
 let touchStartMeta = null
 
-// ===== Audio (WebAudio) =====
-let audio = { ctx:null, master:null, bgm:null, bgmGain:null, enabled:false }
+// ===== Audio (WebAudio: SEのみ) =====
+let audio = { ctx:null, master:null, enabled:true }
 function initAudio(){
   if(audio.ctx) return
   const AC = window.AudioContext || window.webkitAudioContext
   const ctx = new AC()
   const master = ctx.createGain(); master.gain.value = 0.8; master.connect(ctx.destination)
-  const bgmGain = ctx.createGain(); bgmGain.gain.value = 0.12; bgmGain.connect(master)
-  audio = { ctx, master, bgm:null, bgmGain, enabled:true }
-}
-function startBGM(){
-  if(!audio.ctx) initAudio()
-  if(audio.bgm) return
-  const o1 = audio.ctx.createOscillator(); o1.type='sawtooth'
-  const o2 = audio.ctx.createOscillator(); o2.type='triangle'
-  o1.connect(audio.bgmGain); o2.connect(audio.bgmGain)
-  const now = audio.ctx.currentTime
-  const base = 110 // A2
-  function sched(t, ratio){ o1.frequency.setValueAtTime(base*ratio, t); o2.frequency.setValueAtTime(base*ratio*2, t) }
-  for(let i=0;i<64;i++){
-    const t = now + i*0.5
-    const pat = [1, 5/4, 3/2, 2][i%4] // A, C#, E, A
-    sched(t, pat)
-  }
-  o1.start(); o2.start()
-  audio.bgm = { o1, o2 }
-}
-function stopBGM(){ if(audio.bgm){ audio.bgm.o1.stop(); audio.bgm.o2.stop(); audio.bgm=null } }
-function toggleAudio(){
-  if(!audio.enabled){ audio.enabled=true; initAudio(); startBGM(); return }
-  if(!audio.ctx){ initAudio(); startBGM(); return }
-  if(audio.bgm){ stopBGM(); audio.enabled=false } else { startBGM(); }
+  audio = { ctx, master, enabled:true }
 }
 function playSE(type='hit'){
-  if(!audio.enabled){ return }
+  if(!audio.enabled) return
   if(!audio.ctx) initAudio()
   const ctx = audio.ctx
   const g = ctx.createGain(); g.connect(audio.master); g.gain.value = 0.2
@@ -183,7 +157,7 @@ window.addEventListener('keyup', e=> keys[e.key]=false)
 function attachInput(){
   // タッチ開始：位置記録・即座に自機をそこへ
   canvas.addEventListener('touchstart', e=>{
-    if(!audio.ctx){ initAudio(); startBGM() }
+    if(!audio.ctx){ initAudio() }
     const t = e.touches[0]
     const rect = canvas.getBoundingClientRect()
     const x = (t.clientX - rect.left) * (canvas.width/rect.width)
@@ -227,7 +201,7 @@ function attachInput(){
     dragging=true; const rect=canvas.getBoundingClientRect(); 
     const x=(e.clientX-rect.left)*(canvas.width/rect.width); const y=(e.clientY-rect.top)*(canvas.height/rect.height)
     dragMeta = { x0:x, y0:y, px0:player.x, py0:player.y }
-    if(!audio.ctx){ initAudio(); startBGM() }
+    if(!audio.ctx){ initAudio() }
   })
   window.addEventListener('mouseup', ()=> { dragging=false; dragMeta=null })
   canvas.addEventListener('mousemove', e=>{
@@ -320,8 +294,9 @@ function step(){
     else { e.x+=e.vx; e.y+=e.vy }
     if(Math.abs(e.x-player.x)<10 && Math.abs(e.y-player.y)<12){
       state.hp -= 10; e.y=999
-      addShake(10, 20)
-      banner('上司：やる気ある？', '#ff4545', 50)
+      addShake(14, 24)
+      effects.push({ type:'flash', color:'rgba(255,0,0,0.25)', t:0, life:12 })
+      banner('上司：やる気ある？', '#ff2d2d', 80)
       playSE('hit')
       if(state.hp<=0){
         if(state.lives>0){ state.lives--; state.hp=100; banner('有給申請（強制）で復活', '#00ffc6', 60) }
@@ -507,13 +482,13 @@ function draw(){
       ctx.restore()
     } else if(f.type==='banner'){
       const a = 1 - f.t/f.life
-      const scale = 1 + Math.sin(f.t/4)*0.06
+      const scale = 1 + Math.sin(f.t/4)*0.08
       ctx.save()
       ctx.globalAlpha = Math.max(0, a)
       ctx.fillStyle = f.color
       ctx.textAlign = 'center'
-      ctx.font = `800 ${Math.floor(22*scale)}px Noto Sans JP`
-      ctx.strokeStyle = 'rgba(0,0,0,0.7)'; ctx.lineWidth = 4
+      ctx.font = `800 ${Math.floor(28*scale)}px Noto Sans JP`
+      ctx.strokeStyle = 'rgba(0,0,0,0.85)'; ctx.lineWidth = 6
       ctx.strokeText(f.text, WIDTH/2, HEIGHT*0.4)
       ctx.fillText(f.text, WIDTH/2, HEIGHT*0.4)
       ctx.restore()
