@@ -110,7 +110,8 @@ function updateHUD(){
 function spawnBoss(){
   const label = BOSSES[state.stage-1] || '社長'
   const yTarget = 64
-  objects.push({ type:'boss', label, x: WIDTH/2, y: yTarget, vx:0, vy:0, hp: 120+40*(state.stage-1), phase:0 })
+  const maxhp = 120 + 40*(state.stage-1)
+  objects.push({ type:'boss', label, x: WIDTH/2, y: yTarget, vx:0, vy:0, hp: maxhp, maxhp, phase:0 })
 }
 
 // 敵出現
@@ -329,6 +330,35 @@ function freezeBulletsNear(x,y,r, t){
   })
 }
 
+function getBoss(){ return objects.find(o=> o.type==='boss' && !o.remove) }
+
+function drawBossHP(b){
+  const padX = 12, padY = 10
+  const w = WIDTH - padX*2
+  const h = 10
+  const ratio = Math.max(0, Math.min(1, b.hp / (b.maxhp || b.hp)))
+  // 背景
+  ctx.save()
+  ctx.globalAlpha = 0.95
+  ctx.fillStyle = 'rgba(20,20,20,0.8)'
+  ctx.fillRect(padX, padY, w, h)
+  // 枠
+  ctx.strokeStyle = '#333'
+  ctx.lineWidth = 1
+  ctx.strokeRect(padX+0.5, padY+0.5, w-1, h-1)
+  // ゲージ
+  ctx.fillStyle = '#ff5c5c'
+  ctx.fillRect(padX, padY, w*ratio, h)
+  // ラベル
+  ctx.fillStyle = '#ddd'
+  ctx.font = 'bold 12px Noto Sans JP'
+  ctx.textAlign = 'left'
+  ctx.fillText(`${b.label} HP`, padX, padY - 2)
+  ctx.textAlign = 'right'
+  ctx.fillText(`${Math.max(0, b.hp)} / ${b.maxhp||b.hp}`, padX + w, padY - 2)
+  ctx.restore()
+}
+
 function draw(){
   ctx.clearRect(0,0,WIDTH,HEIGHT)
   // 背景（工場ライン＋標語ポスター）
@@ -399,6 +429,10 @@ function draw(){
       ctx.restore()
     }
   })
+
+  // ボスHPゲージ（最前面）
+  const b = getBoss()
+  if(b && b.hp>0) drawBossHP(b)
 }
 
 function perfNow(){ return Math.floor(performance.now()/16) }
