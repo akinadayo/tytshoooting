@@ -1,0 +1,55 @@
+/* 無機質・工場風UIのベース */
+:root {
+  --panel: #2b2f33;
+  --panel-edge: #1f2327;
+  --accent: #00ffc6;
+  --warning: #ff4545;
+  --lcd: #aeea00;
+}
+
+html, body { height: 100%; margin: 0; font-family: 'Noto Sans JP', system-ui, sans-serif; overscroll-behavior: none; touch-action: none; }
+
+#game-root { position: fixed; inset: 0;
+  background: radial-gradient(ellipse at center, #1b1e22 0%, #101214 70%);
+  background-image: linear-gradient(90deg, rgba(255,255,255,.02) 1px, transparent 1px),
+                    linear-gradient(0deg, rgba(255,255,255,.02) 1px, transparent 1px),
+                    radial-gradient(circle at 20% 20%, rgba(0,255,198,.05), transparent 30%),
+                    radial-gradient(circle at 80% 60%, rgba(0,255,198,.05), transparent 30%);
+  background-size: 40px 40px, 40px 40px, 100% 100%, 100% 100%;
+}
+
+/* 液晶風数値表示 */
+.lcd {
+  font-family: 'Orbitron', monospace;
+  color: var(--lcd);
+  text-shadow: 0 0 6px rgba(174,234,0,.6);
+}
+
+/* ホラー・ブラックジョーク風 文字敵の見た目 */
+.enemy-text {
+  font-weight: 700;
+  letter-spacing: .05em;
+  color: #e6e6e6;
+  filter: drop-shadow(0 2px 0 #000) drop-shadow(0 0 6px rgba(255,69,69,.35));
+}
+.enemy-text.angry { color: #ffb0b0; transform: skew(-2deg); }
+.bullet-text { color: #ff4545; text-shadow: 0 0 8px rgba(255,69,69,.6); }
+
+/* 工場パネル風UI */
+.panel {
+  background: var(--panel);
+  border: 1px solid #000;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.05), 0 6px 20px rgba(0,0,0,.5);
+}
+.panel .title { background: var(--panel-edge); padding: 6px 10px; font-weight: 700; }
+.panel .row { display: flex; gap: 12px; padding: 10px; align-items: center; }
+.btn { background: #3b4147; border: 1px solid #111; padding: 8px 14px; }
+.btn.primary { border-color: #005f53; color: var(--accent); box-shadow: 0 0 10px rgba(0,255,198,.35) inset; }
+
+/* ドロップ演出 */
+.pickup { filter: drop-shadow(0 0 8px rgba(0,255,198,.5)); animation: float 1.8s ease-in-out infinite; }
+@keyframes float { 0%,100%{ transform: translateY(0)} 50%{ transform: translateY(-6px)} }
+
+/* ボス撃破演出テキスト */
+.big-toast { font-size: 28px; font-weight: 800; color: #ddd; text-align: center; animation: boom 0.8s ease; }
+@keyframes boom { from{ transform: scale(.7); opacity: 0 } to { transform: scale(1); opacity: 1 } }
